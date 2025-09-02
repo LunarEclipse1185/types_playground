@@ -63,7 +63,10 @@ module Repl_frontend (T: THEORY): REPL_FRONTEND = struct
   let eval_statements ctx source =
     let rec eval_stmt ctx echoes xs =
       match xs with
-      | [] -> Ok (ctx, String.concat "\n" @@ List.rev @@ List.filter ((<>) "") echoes)
+      | [] -> Ok List.(ctx,
+        fold_left (fun acc echo -> acc ^ echo ^ "\n") "" @@
+        rev @@
+        filter ((<>) "") echoes)
       | x::xs ->
         Result.bind (T.eval T.eval_dir ctx x) 
         (fun (ctx, echo) -> eval_stmt ctx (echo::echoes) xs)

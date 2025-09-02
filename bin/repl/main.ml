@@ -8,7 +8,7 @@ module Repl (Frontend: Core.REPL_FRONTEND) = struct
       let input = try read_line () with End_of_file -> "" in
       match Frontend.eval_statements ctx input with
       | Ok (ctx, echo) ->
-        print_endline echo;
+        print_string echo;
         repl ctx (* new context *)
       | Error {msg; start; stop} ->
         let output =

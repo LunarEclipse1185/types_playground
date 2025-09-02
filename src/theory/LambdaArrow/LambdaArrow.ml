@@ -38,26 +38,30 @@ module Semantics = struct
 
   (** Assuming [x] is normalizable, performs beta reduction from left to right. *)
   let[@tail_mod_cons] rec normalize x =
-      (* we can abstract out [mapi_var] function *)
+    (* we can abstract out [mapi_var] function *)
     let[@tail_mod_cons] rec shift_free_index x n depth =
       match x with
       | Var index as var -> if index > depth then Var (index + n) else var
-      | Abs x -> shift_free_index x n @@ depth+1
+      | Abs x -> Abs (shift_free_index x n @@ depth+1)
       | Apply (x, x') -> Apply (shift_free_index x n depth, (shift_free_index[@tailcall]) x' n depth)
     in
-    let[@tail_mod_cons] rec reduct x y depth = (* replace all references of de Bruijn index [depth] in [x] by [y] *)
+
+    (* replace all references of de Bruijn index [depth] in [x] by [y] *)
+    let[@tail_mod_cons] rec reduct x y depth = 
+      match x with
+      | Var index as var -> if index = depth then shift_free_index y (index-1) 0 else var
+      | Abs x -> Abs (reduct x y @@ depth+1)
+      | Apply (x, x') -> Apply (reduct x y depth, (reduct[@tailcall]) x' y depth)
+      (* we perform 1 reduction at once otherwise we'll need to store multiple terms and the index will change. depth only increases when we go 1 Abs deeper. *)
+    in
+    
     match x with
-    | Var index as var -> if index = depth then shift_free_index y (index-1) 0 else var
-    | Abs x -> reduct x y @@ depth+1
-    | Apply (x, x') -> Apply (reduct x y depth, (reduct[@tailcall]) x' y depth)
-    (* we perform 1 reduction at once otherwise we'll need to store multiple terms and the index will change. depth only increases when we go 1 Abs deeper. *)
-    in match x with
     | Var _ as var -> var (* keep same *)
-    | Abs x -> normalize x
+    | Abs x -> Abs (normalize x)
     | Apply (x, x') ->
-      let x = normalize x in match x with
-      | Abs x -> reduct x x' 0
-      | _ -> Apply (x, x') (* not beta-reducible *)
+      match normalize x with
+      | Abs x -> reduct x x' 1 (* we are already destructing 1 layer here *)
+      | _ as x -> Apply (x, x') (* not beta-reducible *)
 
   type ctx = (string * tm) list
   let empty_ctx: ctx = []
@@ -74,10 +78,16 @@ module Semantics = struct
       try List.assoc id ctx with Not_found -> raise (Unbound id)
     in
  
-    let[@tail_mod_cons] rec parse_applies locctx = function
-    | [] -> failwith "AST parser yields an empty apply-list"
-    | x::[] -> parse_pre locctx x
-    | x::xs -> Apply (parse_pre locctx x, (parse_applies[@tailcall]) locctx xs) (* the two cases are actually equally possible *)
+    let[@tail_mod_cons] rec parse_applies locctx =
+      let[@tail_mod_cons] rec finalize = function
+        | []-> failwith "AST parser yields an empty apply-list"
+        | x::[] -> x
+        | x::xs -> Apply (finalize xs, x)
+      in
+      let[@tail_mod_cons] rec parse_applies locctx acc = function
+      | x::xs -> parse_applies locctx (parse_pre locctx x :: acc) xs
+      | [] -> finalize acc
+      in parse_applies locctx []
 
     and[@tail_mod_cons] parse_expr locctx = function
     | Applies xs -> parse_applies locctx xs
@@ -161,9 +171,8 @@ let eval eval_dir ctx: statement -> eval_result_t = function
     Ok (ctx, echo_tm None tm)
 | Let (id, x) ->
     let* tm = parse_tm ctx x in
-    Ok ((id, tm)::ctx, echo_tm (Some id) tm)
+    Ok ((id, tm)::(List.filter (fun x -> fst x <> id) ctx), echo_tm (Some id) tm)
 | Dir (dir, x) -> eval_dir ctx dir x
-(* directives should be processed in repl only *)
 
 (* different dir eval options for combining with eval *)
 
@@ -182,6 +191,14 @@ let eval_dir (ctx: ctx) dir x: eval_result_t =
       let* x = parse_tm ctx x in
       Ok (ctx, echo_tm None @@ normalize x)
     | None -> Error {msg = "Directive simp expects 1 expr but got 0"; start = 0; stop = 0})
+  | "h" | "help" ->
+    let help =
+      "REPL Directives:\n" ^
+      ":q | quit\t\tQuit REPL\n" ^
+      ":h | help\t\tPrint this message\n" ^
+      ":c | ctx | context\tLog the current context\n" ^
+      ":simp <expr>\t\tBeta-normalize the expression"
+    in Ok(ctx, help)
   | "verbose" (* not implemented *)
   | "default"
   | "quiet"
