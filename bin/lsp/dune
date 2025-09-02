@@ -1,0 +1,4 @@
+(executable
+ (public_name typeclsp)
+ (name main)
+ (libraries core))

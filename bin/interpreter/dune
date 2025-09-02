@@ -1,0 +1,4 @@
+(executable
+ (public_name typeci)
+ (name main)
+ (libraries core))
