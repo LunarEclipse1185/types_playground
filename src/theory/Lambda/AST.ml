@@ -11,13 +11,10 @@ open Parser
 and expr =
 | Applies of pre_expr list *)
 
-let is_alpha = function 'a' .. 'z' | 'A' .. 'Z' -> true | _ -> false
-let is_digit = function '0' .. '9' -> true | _ -> false
-let is_alnum c = is_alpha c || is_digit c
 let is_iden_char c = is_alnum c || c = '_'
 
 
-(* 2 kinds of open operations: simp, \x.M and application; 1 kind of closed op: (expr)
+(* 3 kinds of open operations: simp, \x.M and application; 1 kind of closed op: (expr)
 where Apply is left assoc; Simp and Abs no need of associativity;
 Precedence: Apply before Abs before Simp, so that `simp M \x. N P` is equivalent to `simp (M \x. (N P)`.
 The parser calling order is reversed: preventing `(simp M) (\x. N) P` and early stopping on `M simp N`. More generally, outermost least-referenced right-open constructs need to be matched first. Though the wording needs consideration. *)
@@ -35,7 +32,7 @@ and expr =
 let keywords = ["let"; "simp"]
 let idenP (): string parser =
   spanP is_iden_char |> only_if (fun id -> List.exists ((=) id) keywords = false)
-
+  
 let rec parenedP (): pre_expr parser =
   (fun x -> Parened x) <$>
   ws *> charP '(' *>
@@ -101,7 +98,8 @@ and tyexprP () = defer @@ fun () -> appliesP () *)
 type statement =
 | Expr of expr (* check type and value *)
 | Let of string * expr (* let a = *)
-| Dir of string * expr option (* REPL direction *)
+| Dir of string * dir_arg_t (* REPL direction *)
+and dir_arg_t = Expr of expr | Str of string
 
 let letP: statement parser =
   (fun x y -> Let (x, y)) <$>
@@ -110,12 +108,16 @@ let letP: statement parser =
   ws *> charP '=' *>
   ws *> exprP ()
 
+
 let dirP: statement parser =
+  let exprArgP = ws *> ((fun x -> (Expr x: dir_arg_t)) <$> exprP ()) in
+  let fallbackP = (fun x -> Str x) <$> optionalSpanP (fun c -> c <> '\n') in
   (fun x y -> Dir (x, y)) <$>
   ws *> charP ':' *>
   (* no ws *) spanP is_iden_char <*>
-  ws *> (optional @@ exprP ())
-
+  (exprArgP <|> fallbackP)
+  
+  
 let statementP: statement parser =
   (fun x -> Expr x) <$> exprP ()
   <|> letP <|> dirP

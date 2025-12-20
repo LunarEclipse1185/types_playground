@@ -6,30 +6,38 @@ module Repl (Frontend: Core.REPL_FRONTEND) = struct
       print_string "λ> ";
       flush stdout;
       let input = try read_line () with End_of_file -> "" in
-      match Frontend.eval_statements ctx input with
+      match Frontend.eval_source ctx input with
       | Ok (ctx, echo) ->
         print_string echo;
         repl ctx (* new context *)
       | Error {msg; start; stop} ->
         let output =
-          "Error at " ^ string_of_int start ^ ":" ^ string_of_int stop ^ "\n    " ^ msg in
+          "Error at " ^ string_of_int start ^ ":" ^ string_of_int stop ^ "\n" ^ msg in
         print_endline output;
         repl ctx (* all changes discarded *)
     in
     repl Frontend.empty_ctx
 end
 
-module LambdaArrowRepl = Repl (Core.Repl_frontend (LambdaArrow))
+module LambdaRepl = Repl (Core.Repl_frontend (Lambda))
+
+let print_greeting () =
+  print_endline "Type Theory Playground 0.0.1";
+  print_endline ""
 
 let print_usage () =
-  let names = ["lambda-arrow"] in
-  print_endline "Usage: ";
+  let names = ["lambda"] in
+  print_endline "Usage (stale): ";
   print_endline ("    typec [ " ^ String.concat " | " names ^ " ] [ <path> ... ]: start REPL in the specified type system, optionally importing modules");
-  print_endline "    typec <path> ...: start REPL by recognizing the module extension name"
+  print_endline "    typec <file> ...: start REPL by recognizing the module extension name"
 
 let () =
-if Array.length Sys.argv < 2 then print_usage () else
-  match Sys.argv.(1) with
-  | "lambda-arrow" -> LambdaArrowRepl.run ()
-  (* | "system-f" -> () *)
+  print_greeting ();
+  match if Array.length Sys.argv < 2 then (
+    print_endline "Defaults to Untyped Lambda Calculus";
+    print_endline "";
+    "lambda")
+  else Sys.argv.(1) with
+  | "lambda" -> LambdaRepl.run ()
+  | "system-f" -> print_endline "Not yet implemented"
   | _ -> print_usage ()

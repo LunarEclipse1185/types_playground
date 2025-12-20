@@ -1,0 +1,8 @@
+# add simp1
+
+# proper directive param handling
+
+# add equal()
+# add let default
+
+new kw: simp1 default

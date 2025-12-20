@@ -1,9 +1,8 @@
 (* Lambda-> type system, also known as the Simply Typed Lambda Calculus. *)
 (* Eager evaluated. *)
 
-(*TODO: change this module name to Lambda and make repl default to lambda *)
 (*TODO: file loading and echoing by directive load (change type to any string and parse them in directive eval), ext=.l *)
-(*TODO: directive echo strength; type system lifting *)
+(*TODO: directive echo strength *)
 open Core
 
 module Syntax = struct
@@ -36,32 +35,53 @@ module Semantics = struct
   (* | (Arrow (ll, lr), Arrow (rl, rr)) -> ty_eq ll rl && ty_eq lr rr
   | _ -> false *)
 
-  (** Assuming [x] is normalizable, performs beta reduction from left to right. *)
+  (** Assuming [x] is normalizable, performs normal-order algorithm from top to down resulting in the beta-eta normal form. *)
   let[@tail_mod_cons] rec normalize x =
+  
     (* we can abstract out [mapi_var] function *)
-    let[@tail_mod_cons] rec shift_free_index x n depth =
+    let[@tail_mod_cons] rec lift_free_var x n depth =
       match x with
       | Var index as var -> if index > depth then Var (index + n) else var
-      | Abs x -> Abs (shift_free_index x n @@ depth+1)
-      | Apply (x, x') -> Apply (shift_free_index x n depth, (shift_free_index[@tailcall]) x' n depth)
+      | Abs x -> Abs (lift_free_var x n @@ depth+1)
+      | Apply (x, x') -> Apply (lift_free_var x n depth, (lift_free_var[@tailcall]) x' n depth)
     in
 
-    (* replace all references of de Bruijn index [depth] in [x] by [y] *)
-    let[@tail_mod_cons] rec reduct x y depth = 
+    (* beta reduce. replace all references of de Bruijn index [depth] in [x] by [y] *)
+    let[@tail_mod_cons] rec reduce x y depth = 
       match x with
-      | Var index as var -> if index = depth then shift_free_index y (index-1) 0 else var
-      | Abs x -> Abs (reduct x y @@ depth+1)
-      | Apply (x, x') -> Apply (reduct x y depth, (reduct[@tailcall]) x' y depth)
-      (* we perform 1 reduction at once otherwise we'll need to store multiple terms and the index will change. depth only increases when we go 1 Abs deeper. *)
+      | Var index ->
+        if index = depth then lift_free_var y (index-1) 0 else
+        if index > depth then Var (index - 1) else Var index
+        (* beta: indexes decremented here *)
+      | Abs x -> Abs (reduce x y @@ depth+1)
+      | Apply (x, x') -> Apply (reduce x y depth, (reduce[@tailcall]) x' y depth)
+    in
+
+    let rec not_occurred index = function
+    | Var ind -> ind <> index
+    | Abs x -> not_occurred (index+1) x
+    | Apply (x, x') -> not_occurred index x && not_occurred index x'
+    in
+
+    let[@tail_mod_cons] rec eta_reduce = function
+    | Abs (Apply (x, Var 1)) ->
+      if not_occurred 1 x
+      then eta_reduce (lift_free_var x (-1) 0)
+      else Abs (Apply (eta_reduce x, Var 1))
+    | x -> x
     in
     
-    match x with
+    eta_reduce @@ match x with
     | Var _ as var -> var (* keep same *)
     | Abs x -> Abs (normalize x)
+    | Apply (Abs x, x') -> normalize @@ reduce x x' 1
+    (* 1 because we are already destructing 1 layer here *)
     | Apply (x, x') ->
-      match normalize x with
-      | Abs x -> reduct x x' 1 (* we are already destructing 1 layer here *)
-      | _ as x -> Apply (x, x') (* not beta-reducible *)
+      let y = normalize x in
+      let y' = normalize x' in
+      match y with (* just preventing dead loop *)
+      | Abs _ -> normalize @@ Apply (y, y')
+      | _ -> Apply(y, y')
 
   type ctx = (string * tm) list
   let empty_ctx: ctx = []
@@ -78,7 +98,7 @@ module Semantics = struct
       try List.assoc id ctx with Not_found -> raise (Unbound id)
     in
  
-    let[@tail_mod_cons] rec parse_applies locctx =
+    let[@tail_mod_cons] rec parse_applies locctx = 
       let[@tail_mod_cons] rec finalize = function
         | []-> failwith "AST parser yields an empty apply-list"
         | x::[] -> x
@@ -142,7 +162,7 @@ end
 include Semantics
 
 (* if we do the same on term, the eager recursive eval will force reduction from left to right *)
-(* Silly Me, there is NO such thing as beta reduction on a type *)
+(* Silly Me, there is NO such thing as beta reduction on a untypedLambda type *)
 (* let beta_reduct_type y1 y2: ty =
   _ *)
 
@@ -176,30 +196,50 @@ let eval eval_dir ctx: statement -> eval_result_t = function
 
 (* different dir eval options for combining with eval *)
 
+(* type dir_arg_t = Expr of expr | Str of string | None *)
+type eval_dir_t = ctx -> string -> dir_arg_t -> eval_result_t
+
 let eval_dir_deny _ dir _: eval_result_t =
   Error {msg = "Unexpected REPL directive " ^ dir; start = 0; stop = 0}
 
-let eval_dir (ctx: ctx) dir x: eval_result_t =
+let eval_source eval_dir ctx source: eval_result_t =
+  let rec eval_stmt ctx echoes = function
+    | [] -> Ok List.(ctx,
+    fold_left (fun acc echo -> acc ^ echo ^ "\n") "" @@
+    rev @@
+    filter ((<>) "") echoes)
+    | x::xs ->
+      Result.bind (eval eval_dir ctx x) 
+      (fun (ctx, echo) -> eval_stmt ctx (echo::echoes) xs)
+  in Result.bind (ast_from_source source) @@ eval_stmt ctx []
+
+
+let eval_dir (ctx: ctx) dir (arg: dir_arg_t): eval_result_t =
+  let read_file path =
+    try Ok (In_channel.input_all @@ open_in path) with
+    Sys_error e -> Error {msg = e; start = 0; stop = 0}
+  in
+
   let rec print_context echoes = function
   | [] -> String.concat "\n" echoes (* the order is just right *)
   | (id, x)::tail -> print_context (echo_tm (Some id) x :: echoes) tail
   in match dir with
   | "q" | "quit" -> exit 0
   | "c" | "ctx" | "context" -> Ok (ctx, print_context [] ctx)
-  | "simp" -> (match x with
-    | Some x ->
-      let* x = parse_tm ctx x in
-      Ok (ctx, echo_tm None @@ normalize x)
-    | None -> Error {msg = "Directive simp expects 1 expr but got 0"; start = 0; stop = 0})
+  | "l" | "load" -> (match arg with
+    | Str path ->
+      let* source = read_file @@ String.trim path in
+      eval_source eval_dir_deny ctx source
+    | _ -> Error {msg = "Directive load expects 1 argument of file path"; start = 0; stop = 0})
   | "h" | "help" ->
     let help =
       "REPL Directives:\n" ^
       ":q | quit\t\tQuit REPL\n" ^
       ":h | help\t\tPrint this message\n" ^
       ":c | ctx | context\tLog the current context\n" ^
-      ":simp <expr>\t\tBeta-normalize the expression"
+      ":l | load <path>\tLoad statements from a file with extension `.l'"
     in Ok(ctx, help)
   | "verbose" (* not implemented *)
   | "default"
   | "quiet"
-  | _ -> eval_dir_deny ctx dir x
+  | _ -> eval_dir_deny ctx dir arg

@@ -12,6 +12,10 @@ let syntax_error: 'a result_t = Error syntax_error_msg
 
 let run (Parser p) src = p src
 
+let f = function
+| Ok _ -> 1
+| Error _ -> 2
+
 (** Functor structure *)
 
 (** For penetrating on the result of a parser. Note: Technically [(fun) <$>] can be replaced with [pure (fun) <*>] *)
@@ -193,4 +197,8 @@ let optionalSpanP f: string parser = Parser (fun input ->
 let is_space = function
 | ' ' | '\012' | '\n' | '\r' | '\t' -> true
 | _ -> false
+let is_alpha = function 'a' .. 'z' | 'A' .. 'Z' -> true | _ -> false
+let is_digit = function '0' .. '9' -> true | _ -> false
+let is_alnum c = is_alpha c || is_digit c
+
 let ws = optionalSpanP is_space
