@@ -1,11 +1,4 @@
-# add simp1
 
-# proper directive param handling
+# srcmap for error handling; maybe a proper parser state structure is the more correct way
 
-# add let default
- - friendly display
- - avoid name collisions of default vars with generated names
-
-new kw: simp1 default
-
-# srcmap for error handling
+# colored output indication for the beta-reduced part
