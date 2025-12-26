@@ -18,6 +18,7 @@ module type SEMANTICS = sig
   val parse_tm: ctx -> expr -> (tm, errmsg) result
   val parse_ty: ctx -> tyexpr -> (ty, errmsg) result
   
+  val eq: tm -> tm -> bool
   val ty_eq: ty -> ty -> bool
   val string_of_ty: ty -> string
   val string_of_tm: tm -> string
@@ -28,7 +29,7 @@ module type THEORY = sig
   
   val infer: ctx -> tm -> (ty, errmsg) result
   
-  type eval_result_t = (ctx * string, errmsg) result
+  type eval_result_t = (ctx * tm option * string, errmsg) result
   type eval_dir_t = ctx -> string -> string -> eval_result_t
   
   val eval_dir: eval_dir_t
@@ -61,7 +62,10 @@ module Repl_frontend (T: THEORY): REPL_FRONTEND = struct
   type ctx = T.ctx
   let empty_ctx = T.empty_ctx
   
-  (** itering a list with state ctx *)  
-  let eval_source = T.eval_source T.eval_dir
+  (** iterate a list with state ctx *)
+  let eval_source ctx source =
+    let (let*) = Result.bind in
+    let* (ctx, _, echo) = T.eval_source T.eval_dir ctx source in
+    Ok (ctx, echo)
     
 end

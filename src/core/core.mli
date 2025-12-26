@@ -38,6 +38,9 @@ module type SEMANTICS = sig
   val parse_ty: ctx -> tyexpr -> (ty, errmsg) result
   (** parse from ast type annotation a type. *)
 
+  val eq: tm -> tm -> bool
+  (** decide if two terms are equal, if the system has normal forms. *)
+
   val ty_eq: ty -> ty -> bool
   (** decide if two types are equal in the type system. *)
 
@@ -56,7 +59,7 @@ module type THEORY = sig
   val infer: ctx -> tm -> (ty, errmsg) result
   (** infer the type of a given term with context *)
 
-  type eval_result_t = (ctx * string, errmsg) result
+  type eval_result_t = (ctx * tm option * string, errmsg) result
   type eval_dir_t = ctx -> string -> string -> eval_result_t
 
   val eval_dir: eval_dir_t

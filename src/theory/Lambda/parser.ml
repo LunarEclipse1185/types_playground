@@ -115,6 +115,11 @@ let optional p = Parser (fun input ->
   | Ok (x, input) -> Ok (Some x, input)
   | Error _ -> Ok (None, input))
 
+let asBool p = Parser (fun input ->
+  run p input |> function
+  | Ok (_, input) -> Ok (true, input)
+  | Error _ -> Ok (false, input))
+
 (* The Fixed-Point combinator, Y combinator, used to construct recursive expressions that does not loop when evaluating. Essentially a CPS structure. *)
 (* let rec fix f =
   f (fix f)

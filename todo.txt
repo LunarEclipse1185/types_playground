@@ -2,7 +2,10 @@
 
 # proper directive param handling
 
-# add equal()
 # add let default
+ - friendly display
+ - avoid name collisions of default vars with generated names
 
 new kw: simp1 default
+
+# srcmap for error handling

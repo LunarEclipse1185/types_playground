@@ -28,8 +28,9 @@ type pre_expr =
 and expr =
 | Applies of pre_expr list (* M N P *)
 | Simp of expr
+| Simp1 of expr
 
-let keywords = ["let"; "simp"]
+let keywords = ["let"; "simp"; "simp1"; "default"]
 let idenP (): string parser =
   spanP is_iden_char |> only_if (fun id -> List.exists ((=) id) keywords = false)
   
@@ -56,7 +57,9 @@ and appliesP (): expr parser =
   (fun x -> Applies x) <$> some (ws *> preP ())
 and simpP (): expr parser =
   (fun x -> Simp x) <$> ws *> tokenP is_iden_char "simp" *> exprP ()
-and exprP () = defer @@ fun () -> simpP () <|> appliesP ()
+and simp1P (): expr parser =
+  (fun x -> Simp1 x) <$> ws *> tokenP is_iden_char "simp1" *> exprP ()
+and exprP () = defer @@ fun () -> simpP () <|> simp1P () <|> appliesP ()
 (* and exprP (): expr parser = appliesP () *)
 
 
@@ -97,25 +100,26 @@ and tyexprP () = defer @@ fun () -> appliesP () *)
 
 type statement =
 | Expr of expr (* check type and value *)
-| Let of string * expr (* let a = *)
-| Dir of string * dir_arg_t (* REPL direction *)
-and dir_arg_t = Expr of expr | Str of string
+| Let of bool * string * expr (* let a = *)
+| Dir of string * string (* REPL direction *)
+(* and dir_arg_t = string *)
 
 let letP: statement parser =
-  (fun x y -> Let (x, y)) <$>
-  ws *> tokenP is_iden_char "let" *>
+  (fun x y z -> Let (x, y, z)) <$>
+  ws *> stringP "let" *>
+  ws *> (asBool @@ stringP "default") <*>
   ws *> idenP () <*>
   ws *> charP '=' *>
   ws *> exprP ()
 
 
 let dirP: statement parser =
-  let exprArgP = ws *> ((fun x -> (Expr x: dir_arg_t)) <$> exprP ()) in
-  let fallbackP = (fun x -> Str x) <$> optionalSpanP (fun c -> c <> '\n') in
+  (* let exprArgP = ws *> ((fun x -> (Expr x: dir_arg_t)) <$> exprP ()) in *)
+  let argP = optionalSpanP (fun c -> c <> '\n') in
   (fun x y -> Dir (x, y)) <$>
   ws *> charP ':' *>
-  (* no ws *) spanP is_iden_char <*>
-  (exprArgP <|> fallbackP)
+  (* no ws *) spanP is_iden_char <*> argP
+  (* (exprArgP <|> fallbackP) *)
   
   
 let statementP: statement parser =
