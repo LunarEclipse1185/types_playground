@@ -29,7 +29,7 @@ module Semantics = struct
   | Any
 
   let rec eq l r = match (l, r) with
-  | (Var l, Var r) -> l == r
+  | (Var l, Var r) -> l = r
   | (Abs l, Abs r) -> eq l r
   | (Apply (l1, l2), Apply (r1, r2)) -> eq l1 r1 && eq l2 r2
   | _ -> false
@@ -123,7 +123,7 @@ module Semantics = struct
   let ctx_bind ctx iden value default = {
     bindings = (iden, value)::(List.filter (fun x -> fst x <> iden) ctx.bindings);
     defaults =
-      let shadowed = List.exists ((==) iden) ctx.defaults in
+      let shadowed = List.exists ((=) iden) ctx.defaults in
       if default && shadowed || not default && not shadowed then
         ctx.defaults
       else if default && not shadowed then
@@ -197,15 +197,54 @@ module Semantics = struct
     string_of_ty ty false
 
   let rec string_of_tm = function
-    | Var index -> string_of_int @@ index
-    | Abs trm -> "\\ " ^ string_of_tm trm
-    | Apply (Abs _ as l, r) ->
-      "(" ^ string_of_tm l ^ ") " ^ string_of_tm r
-    | Apply (l, (Apply _ as r)) ->
-      string_of_tm l ^ " (" ^ string_of_tm r ^ ")"
-    | Apply (l, r) ->
-      string_of_tm l ^ " " ^ string_of_tm r
+  | Var index -> string_of_int @@ index
+  | Abs tm -> "\\ " ^ string_of_tm tm
+  | Apply (Abs _ as l, r) ->
+    "(" ^ string_of_tm l ^ ") " ^ string_of_tm r
+  | Apply (l, (Apply _ as r)) ->
+    string_of_tm l ^ " (" ^ string_of_tm r ^ ")"
+  | Apply (l, r) ->
+    string_of_tm l ^ " " ^ string_of_tm r
 
+  let string_of_tm_pretty ctx tm =
+    (* starts from `a` and basically does a base-26 numbering *)
+    let increment_name names =
+      let rec increment_name old =
+        let old = String.to_bytes old in
+        let len = Bytes.length old in
+        let new_name = try for i = len-1 to 0 do
+          let char = Bytes.get old i in
+          if char < 'z'
+          then (Bytes.set old i (Char.chr @@ Char.code char + 1); raise Exit)
+          else Bytes.set old i 'a'
+        done; String.make (len+1) 'a' with
+        | Exit -> String.of_bytes old
+        in
+        if (List.exists (fun (x, _) -> x = new_name) ctx.bindings)
+        then increment_name new_name (* aka while loop *)
+        else new_name
+      in
+      match names with
+      | [] ->
+        let initial = "a" in
+        if (List.exists (fun (x, _) -> x = initial) ctx.bindings)
+        then increment_name initial (* aka while loop *)
+        else initial
+      | name::_ -> increment_name name
+    in
+    let rec string_of_tm_pretty names = function
+    | Var index -> List.nth names (index-1)
+    | Abs tm ->
+      let name = increment_name names in
+      "\\" ^ name ^ ". " ^ string_of_tm_pretty (name::names) tm
+    | Apply (Abs _ as l, r) ->
+      "(" ^ string_of_tm_pretty names l ^ ") " ^ string_of_tm_pretty names r
+    | Apply (l, (Apply _ as r)) ->
+      string_of_tm_pretty names l ^ " (" ^ string_of_tm_pretty names r ^ ")"
+    | Apply (l, r) ->
+      string_of_tm_pretty names l ^ " " ^ string_of_tm_pretty names r
+    in
+    string_of_tm_pretty [] tm
 end
 
 include Semantics
@@ -229,37 +268,43 @@ type eval_result_t = (ctx * (tm option) * string, errmsg) result
 
 let (let*) = Result.bind
 
-let echo_tm id x =
+(** echo string specialized for repl environment *)
+let repl_echo_tm ctx id x =
   Option.value id ~default:"-" ^
   " = " ^
-  string_of_tm x
+  string_of_tm_pretty ctx x
 
 (* let-binding an existing name overrides the old one *)
 let eval eval_dir ctx: statement -> eval_result_t = function
 | Expr x ->
     let* tm = parse_tm ctx x in
     (* let* ty = infer ctx tm in *)
-    Ok (ctx, Some tm, echo_tm None tm)
+    Ok (ctx, Some tm, repl_echo_tm ctx None tm)
 | Let (default, id, x) ->
     let* tm = parse_tm ctx x in
-    Ok (ctx_bind ctx id tm default, Some tm, "default " ^ echo_tm (Some id) tm)
+    let ctx' = ctx_bind ctx id tm false in (* to avoid the name in trace, while not showing id=id *)
+    Ok (ctx_bind ctx id tm default, Some tm,
+      (if default then "default " else "") ^
+      repl_echo_tm ctx' (Some id) tm)
 | Dir (dir, x) -> eval_dir ctx dir x
 
-let eval_trace eval_dir ctx: statement -> eval_result_t = 
-  let rec trace tm echoes =
+let eval_trace eval_dir ctx stmt max_depth: eval_result_t = 
+  let rec trace ctx tm echoes depth =
     let (tm, did_change) = normalize_step tm in
-    if did_change then trace tm (string_of_tm tm::echoes)
-    else (tm, List.(fold_right (fun echo acc -> acc ^ echo ^ "\n") (filter ((<>) "") echoes) ""))
-  in function
-| Expr x ->
+    if did_change then trace ctx tm (string_of_tm_pretty ctx tm::echoes) (depth-1)
+    else (tm, String.concat "\n" (List.rev @@ List.filter ((<>) "") echoes))
+  in
+  match stmt with
+  | Expr x ->
     let* tm = parse_tm ctx x in
-    let (tm, echo) = trace tm [] in
-    Ok (ctx, Some tm, echo ^ echo_tm None tm)
-| Let (default, id, x) ->
+    let (tm, echo) = trace ctx tm [] max_depth in
+    Ok (ctx, Some tm, echo ^ repl_echo_tm ctx None tm)
+  | Let (default, id, x) ->
     let* tm = parse_tm ctx x in
-    let (tm, echo) = trace tm [] in
-    Ok (ctx_bind ctx id tm default, Some tm, echo ^ echo_tm (Some id) tm)
-| Dir (dir, x) -> eval_dir ctx dir x
+    let ctx' = ctx_bind ctx id tm false in (* to avoid the name in trace, while not showing id=id *)
+    let (tm, echo) = trace ctx' tm [] max_depth in
+    Ok (ctx_bind ctx id tm default, Some tm, echo ^ repl_echo_tm ctx (Some id) tm)
+  | Dir (dir, x) -> eval_dir ctx dir x
 
 (* different dir eval options for combining with eval *)
 
@@ -271,8 +316,8 @@ let eval_dir_deny _ dir _: eval_result_t =
 
 let eval_source (eval_dir: eval_dir_t) ctx source: eval_result_t =
   let rec eval_stmts ctx (value: tm option) echoes = function
-    | [] -> Ok List.(ctx, value,
-      fold_right (fun echo acc -> acc ^ echo ^ "\n") (filter ((<>) "") echoes) "")
+    | [] -> Ok (ctx, value,
+      String.concat "\n" (List.rev @@ List.filter ((<>) "") echoes))
     | x::xs ->
       Result.bind (eval eval_dir ctx x) 
       (fun (ctx, value, echo) -> eval_stmts ctx value (echo::echoes) xs)
@@ -286,10 +331,10 @@ let eval_dir (ctx: ctx) dir (arg: string): eval_result_t =
   in
 
   let rec print_context echoes bindings defaults = match bindings with
-  | [] -> String.concat "\n" echoes (* the order is just right *)
+  | [] -> String.concat "\n" echoes ^ "\n" (* the order is just right *)
   | (id, x)::tail -> print_context (
-      ((if List.exists ((==) id) defaults then "default " else "") ^
-      echo_tm (Some id) x) :: echoes
+      ((if List.exists ((=) id) defaults then "default " else "") ^
+      repl_echo_tm ctx (Some id) x) :: echoes
     ) tail defaults
   in
   match dir with
@@ -299,8 +344,9 @@ let eval_dir (ctx: ctx) dir (arg: string): eval_result_t =
       let* source = read_file @@ String.trim arg in
       eval_source eval_dir_deny ctx source
   | "trace" ->
+    (* TODO: parse an optional depth on-site, e.g. :trace 20 <term> *)
     let* stmt = assert_exhaust @@ Parser.run statementP @@ String.trim arg in
-    eval_trace eval_dir_deny ctx stmt
+    eval_trace eval_dir_deny ctx stmt 20
   | "h" | "help" ->
     let help =
       "Language discription of Untyped Lambda Calculus:\n" ^
@@ -314,7 +360,7 @@ let eval_dir (ctx: ctx) dir (arg: string): eval_result_t =
       ":h | help\t\tPrint this message\n" ^
       ":c | ctx | context\tLog the current context\n" ^
       ":l | load <path>\tLoad statements from a file with extension `.l'\n" ^
-      ":trace <term>\t\tLog the simplification process of a term until termination"
+      ":trace <term>\t\tLog the simplification process of a term until termination\n"
     in Ok(ctx, None, help)
   | "verbose" (* not implemented *)
   | "quiet"
