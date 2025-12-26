@@ -2,3 +2,8 @@
 # srcmap for error handling; maybe a proper parser state structure is the more correct way
 
 # colored output indication for the beta-reduced part
+
+# the trace output is currently messed up (1) names not expanded (2) symbols not persistent between lines (3) missing 1 \n
+
+# need to support explicitly ask to show full expansion of a binding
+

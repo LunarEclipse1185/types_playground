@@ -296,7 +296,7 @@ let eval_trace eval_dir ctx stmt max_depth: eval_result_t =
   let rec trace ctx tm echoes depth =
     let (tm, did_change) = normalize_step tm in
     if did_change then trace ctx tm (string_of_tm_pretty ctx tm::echoes) (depth-1)
-    else (tm, String.concat "\n" (List.rev @@ List.filter ((<>) "") echoes))
+    else (tm, String.concat "\n" (List.rev @@ List.filter ((<>) "") echoes) ^ "\n")
   in
   match stmt with
   | Expr x ->
