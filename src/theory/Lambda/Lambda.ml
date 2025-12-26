@@ -232,17 +232,21 @@ module Semantics = struct
         else initial
       | name::_ -> increment_name name
     in
-    let rec string_of_tm_pretty names = function
-    | Var index -> List.nth names (index-1)
-    | Abs tm ->
-      let name = increment_name names in
-      "\\" ^ name ^ ". " ^ string_of_tm_pretty (name::names) tm
-    | Apply (Abs _ as l, r) ->
-      "(" ^ string_of_tm_pretty names l ^ ") " ^ string_of_tm_pretty names r
-    | Apply (l, (Apply _ as r)) ->
-      string_of_tm_pretty names l ^ " (" ^ string_of_tm_pretty names r ^ ")"
-    | Apply (l, r) ->
-      string_of_tm_pretty names l ^ " " ^ string_of_tm_pretty names r
+    let rec string_of_tm_pretty names tm =
+      match List.find_opt (fun id -> eq tm @@ List.assoc id ctx.bindings) ctx.defaults with
+      | Some id -> id
+      | None ->
+      match tm with
+      | Var index -> List.nth names (index-1)
+      | Abs tm ->
+        let name = increment_name names in
+        "\\" ^ name ^ ". " ^ string_of_tm_pretty (name::names) tm
+      | Apply (Abs _ as l, r) ->
+        "(" ^ string_of_tm_pretty names l ^ ") " ^ string_of_tm_pretty names r
+      | Apply (l, (Apply _ as r)) ->
+        string_of_tm_pretty names l ^ " (" ^ string_of_tm_pretty names r ^ ")"
+      | Apply (l, r) ->
+        string_of_tm_pretty names l ^ " " ^ string_of_tm_pretty names r
     in
     string_of_tm_pretty [] tm
 end
