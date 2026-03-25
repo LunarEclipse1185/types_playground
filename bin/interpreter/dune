@@ -1,4 +1,4 @@
 (executable
- (public_name typeci)
+ (public_name typesi)
  (name main)
  (libraries core))

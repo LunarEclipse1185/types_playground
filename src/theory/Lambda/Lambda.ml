@@ -249,6 +249,47 @@ module Semantics = struct
         string_of_tm_pretty names l ^ " " ^ string_of_tm_pretty names r
     in
     string_of_tm_pretty [] tm
+  
+  let string_of_tm_expanded ctx tm =
+    (* starts from `a` and basically does a base-26 numbering *)
+    let increment_name names =
+      let rec increment_name old =
+        let old = String.to_bytes old in
+        let len = Bytes.length old in
+        let new_name = try for i = len-1 to 0 do
+          let char = Bytes.get old i in
+          if char < 'z'
+          then (Bytes.set old i (Char.chr @@ Char.code char + 1); raise Exit)
+          else Bytes.set old i 'a'
+        done; String.make (len+1) 'a' with
+        | Exit -> String.of_bytes old
+        in
+        if (List.exists (fun (x, _) -> x = new_name) ctx.bindings)
+        then increment_name new_name (* aka while loop *)
+        else new_name
+      in
+      match names with
+      | [] ->
+        let initial = "a" in
+        if (List.exists (fun (x, _) -> x = initial) ctx.bindings)
+        then increment_name initial (* aka while loop *)
+        else initial
+      | name::_ -> increment_name name
+    in
+    let rec string_of_tm_pretty names tm =
+      match tm with
+      | Var index -> List.nth names (index-1)
+      | Abs tm ->
+        let name = increment_name names in
+        "\\" ^ name ^ ". " ^ string_of_tm_pretty (name::names) tm
+      | Apply (Abs _ as l, r) ->
+        "(" ^ string_of_tm_pretty names l ^ ") " ^ string_of_tm_pretty names r
+      | Apply (l, (Apply _ as r)) ->
+        string_of_tm_pretty names l ^ " (" ^ string_of_tm_pretty names r ^ ")"
+      | Apply (l, r) ->
+        string_of_tm_pretty names l ^ " " ^ string_of_tm_pretty names r
+    in
+    string_of_tm_pretty [] tm
 end
 
 include Semantics
@@ -278,6 +319,11 @@ let repl_echo_tm ctx id x =
   " = " ^
   string_of_tm_pretty ctx x
 
+let repl_echo_tm_expanded ctx id x =
+  Option.value id ~default:"-" ^
+  " = " ^
+  string_of_tm_expanded ctx x
+
 (* let-binding an existing name overrides the old one *)
 let eval eval_dir ctx: statement -> eval_result_t = function
 | Expr x ->
@@ -290,6 +336,19 @@ let eval eval_dir ctx: statement -> eval_result_t = function
     Ok (ctx_bind ctx id tm default, Some tm,
       (if default then "default " else "") ^
       repl_echo_tm ctx' (Some id) tm)
+| Dir (dir, x) -> eval_dir ctx dir x
+
+let eval_expanded eval_dir ctx: statement -> eval_result_t = function
+| Expr x ->
+    let* tm = parse_tm ctx x in
+    (* let* ty = infer ctx tm in *)
+    Ok (ctx, Some tm, repl_echo_tm_expanded ctx None tm)
+| Let (default, id, x) ->
+    let* tm = parse_tm ctx x in
+    let ctx' = ctx_bind ctx id tm false in (* to avoid the name in trace, while not showing id=id *)
+    Ok (ctx_bind ctx id tm default, Some tm,
+      (if default then "default " else "") ^
+      repl_echo_tm_expanded ctx' (Some id) tm)
 | Dir (dir, x) -> eval_dir ctx dir x
 
 let eval_trace eval_dir ctx stmt max_depth: eval_result_t = 
@@ -347,6 +406,9 @@ let eval_dir (ctx: ctx) dir (arg: string): eval_result_t =
   | "l" | "load" ->
       let* source = read_file @@ String.trim arg in
       eval_source eval_dir_deny ctx source
+  | "def" ->
+    let* stmt = assert_exhaust @@ Parser.run statementP @@ String.trim arg in
+    eval_expanded eval_dir_deny ctx stmt
   | "trace" ->
     (* TODO: parse an optional depth on-site, e.g. :trace 20 <term> *)
     let* stmt = assert_exhaust @@ Parser.run statementP @@ String.trim arg in
@@ -364,6 +426,7 @@ let eval_dir (ctx: ctx) dir (arg: string): eval_result_t =
       ":h | help\t\tPrint this message\n" ^
       ":c | ctx | context\tLog the current context\n" ^
       ":l | load <path>\tLoad statements from a file with extension `.l'\n" ^
+      ":def <term>\t\tLog the expanded form, without abbreviating\n" ^
       ":trace <term>\t\tLog the simplification process of a term until termination\n"
     in Ok(ctx, None, help)
   | "verbose" (* not implemented *)

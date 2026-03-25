@@ -1,4 +1,4 @@
 (library
- (public_name typec.core)
+ (public_name types.core)
  (name core)
  (modules core))

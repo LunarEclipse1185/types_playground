@@ -28,8 +28,8 @@ let print_greeting () =
 let print_usage () =
   let names = ["lambda"] in
   print_endline "Usage (stale): ";
-  print_endline ("    typec [ " ^ String.concat " | " names ^ " ] [ <path> ... ]: start REPL in the specified type system, optionally importing modules");
-  print_endline "    typec <file> ...: start REPL by recognizing the module extension name"
+  print_endline ("    types [ " ^ String.concat " | " names ^ " ] [ <path> ... ]: start REPL in the specified type system, optionally importing modules");
+  print_endline "    types <file> ...: start REPL by recognizing the module extension name"
 
 let () =
   print_greeting ();

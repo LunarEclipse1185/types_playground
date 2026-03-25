@@ -1,9 +1,13 @@
+Lambda
 
-# srcmap for error handling; maybe a proper parser state structure is the more correct way
+- srcmap for error handling; maybe a proper parser state structure is the more correct way
 
-# colored output indication for the beta-reduced part
+- colored output indication for the beta-reduced part
+- marked subexpressions?
+- specialization for numerals: (1)parsing (2)abbreviating
 
-# the trace output is currently messed up (1) names not expanded (2) symbols not persistent between lines (3) missing 1 \n
+- the trace output is currently messed up (1) names not expanded (2) symbols not persistent between lines (3) missing 1 \n
 
-# need to support explicitly ask to show full expansion of a binding
+- refactor: named parameters, duck type to structs, abstraction(look for _expanded)
 
+- make 2 types of terms and provide conversions between them
