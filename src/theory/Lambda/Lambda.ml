@@ -42,12 +42,12 @@ module Semantics = struct
   match x with
   | Var index as var -> if index > depth then Var (index + n) else var
   | Abs x -> Abs (lift_free_var x n @@ depth+1)
-  | Apply (x, x') -> Apply (lift_free_var x n depth, (lift_free_var[@tailcall]) x' n depth)
+  | Apply (x, y) -> Apply (lift_free_var x n depth, (lift_free_var[@tailcall]) y n depth)
   
   let rec not_occurred index = function
   | Var ind -> ind <> index
   | Abs x -> not_occurred (index+1) x
-  | Apply (x, x') -> not_occurred index x && not_occurred index x'
+  | Apply (x, y) -> not_occurred index x && not_occurred index y
   
   (** beta reduce helper. replaces all references of de Bruijn index [depth] in [x] by [y] *)
   let[@tail_mod_cons] rec substitute x y depth = 
@@ -57,19 +57,20 @@ module Semantics = struct
       if index > depth then Var (index - 1) else Var index
       (* beta: indexes decremented here *)
     | Abs x -> Abs (substitute x y @@ depth+1)
-    | Apply (x, x') -> Apply (substitute x y depth, (substitute[@tailcall]) x' y depth)
+    | Apply (x, z) -> Apply (substitute x y depth, (substitute[@tailcall]) z y depth)
     
   let [@tail_mod_cons] rec beta_reduce = function
   | Var _ as var -> var (* keep same *)
   | Abs x -> Abs (beta_reduce x)
-  | Apply (Abs x, x') -> beta_reduce @@ substitute x x' 1
+  | Apply (Abs x, y) -> beta_reduce @@ substitute x y 1
   (* 1 because we are already destructuring 1 layer here *)
-  | Apply (x, x') -> (* here x will not ever be Abs, but can reduce to Abs *)
-    let y = beta_reduce x in
-    let y' = beta_reduce x' in
-    match y with (* to prevent dead loop, and avoid early stops *)
-    | Abs _ -> beta_reduce @@ Apply (y, y')
-    | _ -> Apply(y, y')
+  | Apply (x, y) ->
+    let x' = beta_reduce x in
+    match x' with
+    | Abs x'' -> beta_reduce @@ substitute x'' y 1
+    | _ -> 
+      let y' = beta_reduce y in
+      Apply(x', y')
     
   let[@tail_mod_cons] rec eta_reduce = function
   | Abs (Apply (x, Var 1)) ->
@@ -77,27 +78,26 @@ module Semantics = struct
     then eta_reduce (lift_free_var x (-1) 0)
     else Abs (Apply (eta_reduce x, Var 1))
   | Abs x -> Abs (eta_reduce x)
-  | Apply (x, x') -> Apply (eta_reduce x, (eta_reduce[@tailcall]) x')
+  | Apply (x, y) -> Apply (eta_reduce x, (eta_reduce[@tailcall]) y)
   | x -> x
   
   (** Assuming [x] is normalizable, performs normal-order algorithm from
   top to down resulting in the beta-eta normal form. *)
   let normalize x = eta_reduce @@ beta_reduce x
 
-  (* perform 1 step of reduction in the same order as used above,
-  except that parallel reductions in Apply branches get reduced at the same time.
-  it is better to use the above version if partial results are not to be used. *)
+  (* perform 1 step of reduction in the same order as used above *)
   let[@tail_mod_cons] normalize_step x =
     (* bool: didChange *)
     let[@tail_mod_cons] rec beta_step = function
     | Var _ as var -> (var, false)
     | Abs x -> let (x', did_change) = beta_step x in (Abs (x'), did_change)
-    | Apply (Abs x, x') -> (substitute x x' 1, true)
+    | Apply (Abs x, y) -> (substitute x y 1, true)
     (* 1 because we are already destructuring 1 layer here *)
-    | Apply (x, x') ->
-      let (y, did_change) = beta_step x in
-      let (y', did_change') = beta_step x' in
-      (Apply(y, y'), did_change || did_change')
+    | Apply (x, y) -> (* TODO *)
+      let (x', did_change) = beta_step x in
+      if did_change then (Apply(x', y), did_change) else
+        let (y', did_change') = beta_step y in
+        (Apply(x', y'), did_change || did_change')
     in
 
     let[@tail_mod_cons] rec eta_step = function
@@ -106,10 +106,10 @@ module Semantics = struct
       then (lift_free_var x (-1) 0, true)
       else let (y, did_change) = eta_step x in
         (Abs (Apply (y, Var 1)), did_change)
-    | Apply (x, x') ->
-      let (y, did_change) = eta_step x in
-      let (y', did_change') = eta_step x' in
-      (Apply (y, y'), did_change || did_change')
+    | Apply (x, y) ->
+      let (x', did_change) = eta_step x in
+      let (y', did_change') = eta_step y in
+      (Apply (x', y'), did_change || did_change')
     | x -> (x, false)
     in
 
